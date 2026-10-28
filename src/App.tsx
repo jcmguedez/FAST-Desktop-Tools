@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
+import GestionEntidades, { Entidad } from './components/GestionEntidades';
+import GeneradorDiagramas from './components/GeneradorDiagramas';
+import DiccionarioDatos from './components/DiccionarioDatos';
 import { 
   Database, 
-  Server, 
-  Play, 
-  Trash2, 
+  FolderGit2, 
+  Layers, 
+  Workflow, 
+  Users, 
+  Sparkles, 
+  FileText, 
   RefreshCw, 
   CheckCircle2, 
-  AlertCircle, 
-  FileCode, 
-  Copy, 
+  Code2, 
   Check, 
-  ExternalLink,
-  Layers,
-  ArrowRightLeft
+  Copy, 
+  Plus 
 } from 'lucide-react';
 
 interface Proyecto {
@@ -22,550 +25,442 @@ interface Proyecto {
   fecha_creacion: string;
 }
 
-interface ServerInfo {
-  status: string;
-  database: string;
-  table: string;
-  engine: string;
-  uptime: number;
+interface Fase {
+  id: number;
+  proyecto_id: number;
+  tipo_fase: string;
+  estado: string;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+}
+
+interface Proceso {
+  id: number;
+  proyecto_id: number;
+  nombre: string;
+  descripcion: string | null;
+  numero_proceso: string;
+}
+
+interface FlujoDato {
+  id: number;
+  descripcion: string;
+  proceso_origen_id: number | null;
+  proceso_destino_id: number | null;
+  entidad_id: number | null;
+  proceso_origen_nombre?: string;
+  proceso_origen_num?: string;
+  proceso_destino_nombre?: string;
+  proceso_destino_num?: string;
+  entidad_nombre?: string;
+}
+
+interface Puesto {
+  id: number;
+  proyecto_id: number;
+  nombre: string;
+  descripcion: string | null;
+}
+
+interface ConexionPuesto {
+  id: number;
+  tipo_conexion: string;
+  puesto_origen_id: number;
+  puesto_destino_id: number;
+  puesto_origen_nombre?: string;
+  puesto_destino_nombre?: string;
 }
 
 export default function App() {
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [selectedProyectoId, setSelectedProyectoId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'erd' | 'diagramas' | 'diccionario' | 'dfd' | 'dcp' | 'fases' | 'proyectos' | 'sql'>('erd');
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
-  
-  // Formulario manual
-  const [nombre, setNombre] = useState('');
-  const [cliente, setCliente] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [copiedSQL, setCopiedSQL] = useState(false);
 
-  // Diagnóstico del servidor
-  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  // Datos del proyecto activo
+  const [fases, setFases] = useState<Fase[]>([]);
+  const [entidades, setEntidades] = useState<Entidad[]>([]);
+  const [procesos, setProcesos] = useState<Proceso[]>([]);
+  const [flujos, setFlujos] = useState<FlujoDato[]>([]);
+  const [puestos, setPuestos] = useState<Puesto[]>([]);
+  const [conexiones, setConexiones] = useState<ConexionPuesto[]>([]);
 
-  // Visor de archivos de la arquitectura
-  const [activeTab, setActiveTab] = useState<'app' | 'files' | 'architecture'>('app');
-  const [selectedFileKey, setSelectedFileKey] = useState<'server' | 'package' | 'vite' | 'app'>('server');
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // Formularios
+  const [nombreProceso, setNombreProceso] = useState('');
+  const [descProceso, setDescProceso] = useState('');
+  const [numProceso, setNumProceso] = useState('1.0');
 
-  // 1. Cargar proyectos desde el backend en Express (GET /api/proyectos)
-  const fetchProyectos = async () => {
+  const [nombrePuesto, setNombrePuesto] = useState('');
+  const [descPuesto, setDescPuesto] = useState('');
+
+  const [nuevoNombreProyecto, setNuevoNombreProyecto] = useState('');
+  const [nuevoClienteProyecto, setNuevoClienteProyecto] = useState('');
+
+  const notify = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  // 1. Cargar proyectos
+  const loadProyectos = async () => {
     try {
       setLoading(true);
-      setError(null);
       const res = await fetch('/api/proyectos');
-      if (!res.ok) {
-        throw new Error(`Error HTTP: ${res.status} ${res.statusText}`);
-      }
       const data: Proyecto[] = await res.json();
       setProyectos(data);
-    } catch (err: any) {
-      console.error('Error al cargar proyectos de la API:', err);
-      setError('No se pudo conectar con el backend en Express (/api/proyectos).');
+      if (data.length > 0 && !selectedProyectoId) {
+        setSelectedProyectoId(data[0].id);
+      }
+    } catch (err) {
+      console.error('Error cargando proyectos:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Cargar estado de la base de datos
-  const checkServerHealth = async () => {
+  useEffect(() => {
+    loadProyectos();
+  }, []);
+
+  // 2. Cargar todos los datos del proyecto activo
+  const loadFullProjectData = async (pid: number) => {
     try {
-      const res = await fetch('/api/info');
-      if (res.ok) {
-        const info = await res.json();
-        setServerInfo(info);
-      }
-    } catch {
-      // Ignorar si el endpoint info no está presente
+      const [resFases, resEntidades, resProcesos, resFlujos, resPuestos, resConexiones] = await Promise.all([
+        fetch(`/api/fases/${pid}`).then((r) => r.json()),
+        fetch(`/api/entidades/${pid}`).then((r) => r.json()),
+        fetch(`/api/procesos/${pid}`).then((r) => r.json()),
+        fetch(`/api/flujos_datos/${pid}`).then((r) => r.json()),
+        fetch(`/api/puestos/${pid}`).then((r) => r.json()),
+        fetch(`/api/conexiones_puestos/${pid}`).then((r) => r.json())
+      ]);
+
+      setFases(resFases || []);
+      setEntidades(resEntidades || []);
+      setProcesos(resProcesos || []);
+      setFlujos(resFlujos || []);
+      setPuestos(resPuestos || []);
+      setConexiones(resConexiones || []);
+    } catch (err) {
+      console.error('Error al cargar datos del proyecto:', err);
     }
   };
 
   useEffect(() => {
-    fetchProyectos();
-    checkServerHealth();
-  }, []);
-
-  const notify = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3500);
-  };
-
-  // 2. Función del botón "Crear Registro Rápido" (POST /api/proyectos con datos de prueba)
-  const handleCrearRegistroRapido = async () => {
-    try {
-      setIsSubmitting(true);
-      // Lista de ejemplos variados para prueba rápida
-      const sampleNames = ['Proyecto de Prueba', 'Migración Cloud 2026', 'Auditoría Fintech', 'App Móvil React'];
-      const sampleClients = ['Cliente Test', 'Acme Corp', 'Stark Logistics', 'Banco Futuro'];
-      const randomIndex = Math.floor(Math.random() * sampleNames.length);
-
-      const payload = {
-        nombre: sampleNames[randomIndex],
-        cliente: sampleClients[randomIndex]
-      };
-
-      const res = await fetch('/api/proyectos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al crear proyecto en la base de datos');
-      }
-
-      notify(`Registro rápido creado: "${payload.nombre}" (${payload.cliente})`);
-      // Recargar la lista desde la base de datos SQLite
-      await fetchProyectos();
-    } catch (err: any) {
-      console.error('Error al insertar registro rápido:', err);
-      notify(err.message || 'Error en la petición POST a /api/proyectos');
-    } finally {
-      setIsSubmitting(false);
+    if (selectedProyectoId) {
+      loadFullProjectData(selectedProyectoId);
     }
-  };
+  }, [selectedProyectoId]);
 
-  // 3. Crear proyecto mediante el formulario manual
-  const handleFormSubmit = async (e: React.FormEvent) => {
+  // Manejador: Crear Proyecto
+  const handleCrearProyecto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombre.trim() || !cliente.trim()) return;
+    if (!nuevoNombreProyecto.trim() || !nuevoClienteProyecto.trim()) return;
 
     try {
-      setIsSubmitting(true);
       const res = await fetch('/api/proyectos', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ nombre: nombre.trim(), cliente: cliente.trim() })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nuevoNombreProyecto.trim(), cliente: nuevoClienteProyecto.trim() })
       });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al guardar el proyecto');
-      }
-
-      notify('Proyecto guardado correctamente en database.db');
-      setNombre('');
-      setCliente('');
-      await fetchProyectos();
-    } catch (err: any) {
-      console.error('Error al guardar:', err);
-      notify(err.message || 'Error al conectar con la API');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // 4. Eliminar proyecto
-  const handleDelete = async (id: number) => {
-    try {
-      const res = await fetch(`/api/proyectos/${id}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) {
-        throw new Error('No se pudo eliminar');
-      }
-      notify(`Proyecto #${id} eliminado`);
-      await fetchProyectos();
+      const nuevo = await res.json();
+      notify(`Proyecto "${nuevo.nombre}" creado exitosamente.`);
+      setNuevoNombreProyecto('');
+      setNuevoClienteProyecto('');
+      await loadProyectos();
+      setSelectedProyectoId(nuevo.id);
     } catch (err) {
-      console.error('Error al eliminar:', err);
-      notify('Error al eliminar el proyecto');
+      console.error(err);
+      notify('Error al crear el proyecto');
     }
   };
 
-  const copyCode = async (text: string, key: string) => {
+  // Manejador: Crear Proceso
+  const handleCrearProceso = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProyectoId || !nombreProceso.trim()) return;
+
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2000);
-    } catch (e) {
-      console.error(e);
+      const res = await fetch('/api/procesos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          proyecto_id: selectedProyectoId,
+          nombre: nombreProceso.trim(),
+          descripcion: descProceso.trim() || null,
+          numero_proceso: numProceso.trim()
+        })
+      });
+      if (res.ok) {
+        notify(`Proceso "${numProceso} ${nombreProceso}" guardado`);
+        setNombreProceso('');
+        setDescProceso('');
+        setNumProceso(`${(parseFloat(numProceso) + 1).toFixed(1)}`);
+        loadFullProjectData(selectedProyectoId);
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  // Archivos generados para visualización directa
-  const filesContent = {
-    server: {
-      path: 'server.js',
-      description: 'Servidor Express corriendo en el puerto 3000, con CORS, conexión a database.db y endpoints de proyectos.',
-      code: `import express from 'express';
-import cors from 'cors';
-import Database from 'better-sqlite3';
+  // Manejador: Crear Puesto
+  const handleCrearPuesto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProyectoId || !nombrePuesto.trim()) return;
 
-const app = express();
-const PORT = 3000;
+    try {
+      const res = await fetch('/api/puestos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          proyecto_id: selectedProyectoId,
+          nombre: nombrePuesto.trim(),
+          descripcion: descPuesto.trim() || null
+        })
+      });
+      if (res.ok) {
+        notify(`Puesto "${nombrePuesto}" registrado`);
+        setNombrePuesto('');
+        setDescPuesto('');
+        loadFullProjectData(selectedProyectoId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
-// Configuración de middlewares
-app.use(cors());
-app.use(express.json());
+  const copySQL = async () => {
+    const sql = `-- ESQUEMA COMPLETO FAST EN SQLITE (database.db)
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
 
-// Conexión a la base de datos local SQLite
-const db = new Database('database.db');
-db.pragma('journal_mode = WAL');
-
-// Creación automática de la tabla proyectos
-const createTableSQL = \`
 CREATE TABLE IF NOT EXISTS proyectos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   nombre TEXT NOT NULL,
   cliente TEXT NOT NULL,
   fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-\`;
-db.exec(createTableSQL);
-console.log('✅ Base de datos SQLite lista. Tabla "proyectos" verificada.');
 
-// Endpoint GET /api/proyectos
-app.get('/api/proyectos', (req, res) => {
-  try {
-    const stmt = db.prepare('SELECT id, nombre, cliente, fecha_creacion FROM proyectos ORDER BY id DESC');
-    const proyectos = stmt.all();
-    res.json(proyectos);
-  } catch (error) {
-    console.error('Error al consultar proyectos:', error);
-    res.status(500).json({ error: 'Error al consultar proyectos' });
-  }
-});
+CREATE TABLE IF NOT EXISTS fases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  tipo_fase TEXT NOT NULL,
+  estado TEXT NOT NULL DEFAULT 'Pendiente',
+  fecha_inicio DATETIME,
+  fecha_fin DATETIME,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
 
-// Endpoint POST /api/proyectos
-app.post('/api/proyectos', (req, res) => {
-  try {
-    const { nombre, cliente } = req.body;
+CREATE TABLE IF NOT EXISTS entidades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre TEXT NOT NULL,
+  descripcion TEXT,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
 
-    if (!nombre || !cliente) {
-      return res.status(400).json({ error: 'Los campos "nombre" y "cliente" son obligatorios.' });
-    }
+CREATE TABLE IF NOT EXISTS atributos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entidad_id INTEGER NOT NULL,
+  nombre TEXT NOT NULL,
+  tipo_dato TEXT NOT NULL DEFAULT 'VARCHAR(100)',
+  es_clave_primaria INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (entidad_id) REFERENCES entidades(id) ON DELETE CASCADE
+);
 
-    const stmt = db.prepare('INSERT INTO proyectos (nombre, cliente) VALUES (?, ?)');
-    const info = stmt.run(nombre.trim(), cliente.trim());
+CREATE TABLE IF NOT EXISTS procesos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre TEXT NOT NULL,
+  descripcion TEXT,
+  numero_proceso TEXT NOT NULL,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
 
-    const nuevoProyecto = db.prepare('SELECT id, nombre, cliente, fecha_creacion FROM proyectos WHERE id = ?').get(info.lastInsertRowid);
-    res.status(201).json(nuevoProyecto);
-  } catch (error) {
-    console.error('Error al insertar proyecto:', error);
-    res.status(500).json({ error: 'Error al registrar el proyecto' });
-  }
-});
+CREATE TABLE IF NOT EXISTS flujos_datos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proceso_origen_id INTEGER,
+  proceso_destino_id INTEGER,
+  entidad_id INTEGER,
+  descripcion TEXT NOT NULL,
+  FOREIGN KEY (proceso_origen_id) REFERENCES procesos(id) ON DELETE CASCADE,
+  FOREIGN KEY (proceso_destino_id) REFERENCES procesos(id) ON DELETE CASCADE,
+  FOREIGN KEY (entidad_id) REFERENCES entidades(id) ON DELETE CASCADE
+);
 
-// Endpoint DELETE /api/proyectos/:id (opcional)
-app.delete('/api/proyectos/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    const stmt = db.prepare('DELETE FROM proyectos WHERE id = ?');
-    const info = stmt.run(id);
+CREATE TABLE IF NOT EXISTS puestos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre TEXT NOT NULL,
+  descripcion TEXT,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
 
-    if (info.changes === 0) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
-    }
-    res.json({ success: true, message: \`Proyecto #\${id} eliminado\` });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al eliminar el proyecto' });
-  }
-});
-
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(\`🚀 Servidor Express ejecutándose en http://localhost:\${PORT}\`);
-});`
-    },
-    package: {
-      path: 'package.json',
-      description: 'Manifiesto con express, cors, better-sqlite3 y script concurrent para correr frontend y backend.',
-      code: `{
-  "name": "fast-web-tool",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "server": "node server.js",
-    "dev:front": "vite",
-    "dev": "concurrently \\"npm run server\\" \\"npm run dev:front\\"",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "better-sqlite3": "^11.8.1",
-    "cors": "^2.8.5",
-    "express": "^4.21.2",
-    "lucide-react": "^0.475.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.13.0",
-    "@types/react": "^19.0.8",
-    "@types/react-dom": "^19.0.3",
-    "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.2",
-    "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.3",
-    "vite": "^6.1.0"
-  }
-}`
-    },
-    vite: {
-      path: 'vite.config.ts',
-      description: 'Configuración de Vite con puerto 5173 y proxy para redirigir /api a http://localhost:3000.',
-      code: `import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
-
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  server: {
-    port: 5173,
-    proxy: {
-      // Redirige todas las llamadas /api al backend Express en el puerto 3000
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-        secure: false,
-      },
-    },
-  },
-});`
-    },
-    app: {
-      path: 'src/App.tsx',
-      description: 'Componente React con useEffect para GET /api/proyectos y botón "Crear Registro Rápido" con POST.',
-      code: `import { useState, useEffect } from 'react';
-
-interface Proyecto {
-  id: number;
-  nombre: string;
-  cliente: string;
-  fecha_creacion: string;
-}
-
-export default function App() {
-  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // 1. Cargar proyectos reales de la base de datos SQLite vía backend
-  const fetchProyectos = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/proyectos');
-      const data = await res.json();
-      setProyectos(data);
-    } catch (err) {
-      console.error('Error al cargar proyectos:', err);
-    } finally {
-      setLoading(false);
-    }
+CREATE TABLE IF NOT EXISTS conexiones_puestos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  puesto_origen_id INTEGER NOT NULL,
+  puesto_destino_id INTEGER NOT NULL,
+  tipo_conexion TEXT NOT NULL DEFAULT 'Documental',
+  FOREIGN KEY (puesto_origen_id) REFERENCES puestos(id) ON DELETE CASCADE,
+  FOREIGN KEY (puesto_destino_id) REFERENCES puestos(id) ON DELETE CASCADE
+);`;
+    await navigator.clipboard.writeText(sql);
+    setCopiedSQL(true);
+    setTimeout(() => setCopiedSQL(false), 2000);
   };
 
-  useEffect(() => {
-    fetchProyectos();
-  }, []);
-
-  // 2. Botón Crear Registro Rápido
-  const handleCrearRegistroRapido = async () => {
-    try {
-      await fetch('/api/proyectos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nombre: 'Proyecto de Prueba',
-          cliente: 'Cliente Test'
-        })
-      });
-      // Recargar la lista
-      await fetchProyectos();
-    } catch (err) {
-      console.error('Error al crear registro rápido:', err);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
-      <header className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
-        <h1 className="text-xl font-bold text-white">FAST Web Tool</h1>
-        <button
-          onClick={handleCrearRegistroRapido}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-medium text-white transition"
-        >
-          Crear Registro Rápido
-        </button>
-      </header>
-
-      {/* Tabla de proyectos */}
-      <main>
-        {loading ? (
-          <p className="text-xs text-slate-400">Cargando proyectos desde Express...</p>
-        ) : (
-          <table className="w-full text-xs text-left">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400">
-                <th className="py-2">ID</th>
-                <th className="py-2">Nombre</th>
-                <th className="py-2">Cliente</th>
-                <th className="py-2">Fecha</th>
-              </tr>
-            </thead>
-            <tbody>
-              {proyectos.map((p) => (
-                <tr key={p.id} className="border-b border-slate-800/60">
-                  <td className="py-2 font-mono">#{p.id}</td>
-                  <td className="py-2">{p.nombre}</td>
-                  <td className="py-2">{p.cliente}</td>
-                  <td className="py-2 font-mono">{p.fecha_creacion}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </main>
-    </div>
-  );
-}`
-    }
-  };
+  const proyectoActual = proyectos.find((p) => p.id === selectedProyectoId);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600/30">
-      {/* Top Bar seguimento Top Bar Contract */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+      {/* Top Bar seguimento Top Bar Contract: 3 zonas */}
+      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between gap-8">
-          {/* Zone 1: Brand wordmark */}
+          {/* Zona 1: Logo */}
           <div className="flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-600/30">
               F
             </div>
             <div>
               <span className="text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0">
-                FAST App Web Local
+                FAST Desktop Tool · Studio
               </span>
             </div>
           </div>
 
-          {/* Zone 2: Navigation Links */}
-          <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-400">
-            <button
-              onClick={() => setActiveTab('app')}
-              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                activeTab === 'app' ? 'text-indigo-400 font-semibold' : ''
-              }`}
+          {/* Zona 2: Selector de Proyecto Activo */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-medium">Proyecto Activo:</span>
+            <select
+              value={selectedProyectoId || ''}
+              onChange={(e) => setSelectedProyectoId(Number(e.target.value))}
+              className="bg-slate-900 border border-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 font-medium cursor-pointer"
             >
-              Aplicación en Vivo
-            </button>
-            <button
-              onClick={() => setActiveTab('files')}
-              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                activeTab === 'files' ? 'text-indigo-400 font-semibold' : ''
-              }`}
-            >
-              Archivos Generados
-            </button>
-            <button
-              onClick={() => setActiveTab('architecture')}
-              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                activeTab === 'architecture' ? 'text-indigo-400 font-semibold' : ''
-              }`}
-            >
-              Arquitectura Express + Vite Proxy
-            </button>
-          </nav>
+              {proyectos.map((p) => (
+                <option key={p.id} value={p.id}>
+                  #{p.id} - {p.nombre} ({p.cliente})
+                </option>
+              ))}
+            </select>
+          </div>
 
-          {/* Zone 3: Primary Action */}
+          {/* Zona 3: Botón de sincronización */}
           <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={handleCrearRegistroRapido}
-              disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition rounded-lg shadow-sm shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+              onClick={() => {
+                loadProyectos();
+                if (selectedProyectoId) loadFullProjectData(selectedProyectoId);
+              }}
+              className="px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
             >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span>Crear Registro Rápido</span>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Sincronizar SQLite</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
-        {/* Banner de arquitectura en tiempo real */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-6">
+        {/* Cabecera y Barra de Pestañas del Workbench */}
         <div className="space-y-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Node.js Express (Puerto 3000)</span>
-            <span aria-hidden="true">·</span>
-            <span>Vite React Proxy (Puerto 5173)</span>
-            <span aria-hidden="true">·</span>
-            <span>SQLite better-sqlite3 (database.db)</span>
-            <span aria-hidden="true">·</span>
-            <span>Tailwind CSS</span>
-          </div>
-
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-white text-balance">
-                Gestor de Proyectos con Backend Express y SQLite
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
+                {proyectoActual ? proyectoActual.nombre : 'FAST Desktop Tool'}
               </h1>
-              <p className="text-sm text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Esta interfaz consume en vivo los endpoints <code className="text-indigo-300 font-mono">GET /api/proyectos</code> y <code className="text-indigo-300 font-mono">POST /api/proyectos</code> servidos por Express e inserta en la base de datos local SQLite <code className="text-indigo-300 font-mono">database.db</code>.
+              <p className="text-xs text-slate-400 mt-1">
+                Cliente: <strong className="text-slate-200">{proyectoActual?.cliente || 'Sin cliente'}</strong> · Base de datos SQLite: <code className="text-indigo-300 font-mono">database.db</code>
               </p>
             </div>
 
-            {/* Quick status badge */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs flex items-center gap-3 shrink-0">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <div>
-                <div className="text-slate-200 font-medium">Backend Express Activo</div>
-                <div className="text-[11px] text-slate-500 font-mono">
-                  {proyectos.length} {proyectos.length === 1 ? 'registro' : 'registros'} en SQLite
-                </div>
-              </div>
-            </div>
-          </div>
+            {/* Pestañas de Navegación del Sistema FAST */}
+            <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => setActiveTab('erd')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'erd' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Entidades y Atributos (ERD)</span>
+              </button>
 
-          {/* Navigation Sub-Tabs */}
-          <div className="flex items-center gap-2 pt-2 border-b border-slate-800 pb-2">
-            <button
-              onClick={() => setActiveTab('app')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'app'
-                  ? 'bg-indigo-950/60 text-indigo-300 border border-indigo-700/50'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5" />
-              Vista de la Aplicación y Datos
-            </button>
-            <button
-              onClick={() => setActiveTab('files')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'files'
-                  ? 'bg-indigo-950/60 text-indigo-300 border border-indigo-700/50'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <FileCode className="w-3.5 h-3.5" />
-              Archivos del Proyecto (server.js, vite.config.ts, etc.)
-            </button>
-            <button
-              onClick={() => setActiveTab('architecture')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'architecture'
-                  ? 'bg-indigo-950/60 text-indigo-300 border border-indigo-700/50'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              Diagrama de Flujo Proxy
-            </button>
+              <button
+                onClick={() => setActiveTab('diagramas')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'diagramas' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>Diagramas Mermaid.js</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('diccionario')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'diccionario' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Diccionario de Datos (.MD)</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('dfd')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'dfd' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Workflow className="w-3.5 h-3.5" />
+                <span>DFD Procesos ({procesos.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('dcp')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'dcp' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>DCP Puestos ({puestos.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('fases')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'fases' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Fases ({fases.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('proyectos')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'proyectos' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FolderGit2 className="w-3.5 h-3.5" />
+                <span>Proyectos ({proyectos.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('sql')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'sql' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>SQL DDL</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Notificaciones */}
+        {/* Notificación global */}
         {notification && (
           <div className="bg-indigo-950 border border-indigo-700/60 text-indigo-200 text-xs px-4 py-2.5 rounded-lg flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
@@ -573,144 +468,168 @@ export default function App() {
           </div>
         )}
 
-        {error && (
-          <div className="bg-rose-950/80 border border-rose-800/60 text-rose-200 text-xs px-4 py-2.5 rounded-lg flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>{error}</span>
-          </div>
+        {/* ======================================================== */}
+        {/* PESTAÑA 1: GESTIÓN DE ENTIDADES Y ATRIBUTOS (ERD) */}
+        {/* ======================================================== */}
+        {activeTab === 'erd' && (
+          selectedProyectoId ? (
+            <GestionEntidades 
+              proyecto_id={selectedProyectoId} 
+              proyectoNombre={proyectoActual?.nombre} 
+              onDataChange={() => {
+                if (selectedProyectoId) loadFullProjectData(selectedProyectoId);
+              }}
+            />
+          ) : (
+            <div className="p-12 text-center text-xs text-slate-500 bg-slate-900 border border-dashed border-slate-800 rounded-xl">
+              Crea o selecciona un proyecto para registrar entidades y atributos.
+            </div>
+          )
         )}
 
-        {/* Tab 1: Aplicación */}
-        {activeTab === 'app' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Formulario Manual de Nuevo Proyecto */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
-                <h2 className="text-sm font-semibold text-slate-200 mb-1 flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-indigo-400" />
-                  Registrar Nuevo Proyecto
-                </h2>
-                <p className="text-xs text-slate-500 mb-4">
-                  Envía una petición <code className="text-indigo-400 font-mono">POST /api/proyectos</code> al backend en Express.
-                </p>
+        {/* ======================================================== */}
+        {/* PESTAÑA 2: GENERADOR AUTOMÁTICO DE DIAGRAMAS MERMAID */}
+        {/* ======================================================== */}
+        {activeTab === 'diagramas' && selectedProyectoId && (
+          <GeneradorDiagramas
+            proyectoId={selectedProyectoId}
+            proyectoNombre={proyectoActual?.nombre}
+            entidades={entidades}
+            procesos={procesos}
+            flujos={flujos}
+            puestos={puestos}
+            conexiones={conexiones}
+          />
+        )}
 
-                <form onSubmit={handleFormSubmit} className="space-y-4">
+        {/* ======================================================== */}
+        {/* PESTAÑA 3: DICCIONARIO DE DATOS Y PROCESOS */}
+        {/* ======================================================== */}
+        {activeTab === 'diccionario' && proyectoActual && (
+          <DiccionarioDatos
+            proyecto={proyectoActual}
+            fases={fases}
+            entidades={entidades}
+            procesos={procesos}
+            flujos={flujos}
+            puestos={puestos}
+            conexiones={conexiones}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 4: PROCESOS Y FLUJOS DFD */}
+        {/* ======================================================== */}
+        {activeTab === 'dfd' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Nuevo Proceso (DFD)
+              </h3>
+              <form onSubmit={handleCrearProceso} className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">
-                      Nombre del Proyecto
-                    </label>
+                    <label className="block text-[11px] text-slate-400 mb-1">Nº Proceso</label>
                     <input
                       type="text"
-                      value={nombre}
-                      onChange={(e) => setNombre(e.target.value)}
-                      placeholder="Ej. Rediseño Web Corporativa"
-                      className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                      value={numProceso}
+                      onChange={(e) => setNumProceso(e.target.value)}
+                      placeholder="1.0"
+                      className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                       required
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">
-                      Cliente o Empresa
-                    </label>
+                  <div className="col-span-2">
+                    <label className="block text-[11px] text-slate-400 mb-1">Nombre</label>
                     <input
                       type="text"
-                      value={cliente}
-                      onChange={(e) => setCliente(e.target.value)}
-                      placeholder="Ej. Acme Global Solutions"
-                      className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                      value={nombreProceso}
+                      onChange={(e) => setNombreProceso(e.target.value)}
+                      placeholder="Ej. Facturar Orden"
+                      className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
                       required
                     />
                   </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-white rounded-lg transition active:scale-98 cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmitting ? 'Guardando en Express...' : 'Guardar en SQLite'}
-                  </button>
-                </form>
-
-                <div className="mt-6 pt-4 border-t border-slate-800/80">
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Acción de Prueba Requerida
-                  </div>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Inserta un registro con datos de prueba preconfigurados (<code className="text-slate-400 font-mono">nombre: "Proyecto de Prueba", cliente: "Cliente Test"</code>):
-                  </p>
-                  <button
-                    onClick={handleCrearRegistroRapido}
-                    disabled={isSubmitting}
-                    className="w-full py-2 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-medium rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    Botón de Prueba (Crear Registro Rápido)
-                  </button>
                 </div>
+
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Descripción</label>
+                  <textarea
+                    value={descProceso}
+                    onChange={(e) => setDescProceso(e.target.value)}
+                    rows={2}
+                    placeholder="Lógica de transformación"
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white rounded-lg transition cursor-pointer"
+                >
+                  Guardar Proceso
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                  Procesos Registrados ({procesos.length})
+                </h3>
+                {procesos.length === 0 ? (
+                  <p className="text-xs text-slate-500">Sin procesos en este proyecto.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {procesos.map((proc) => (
+                      <div
+                        key={proc.id}
+                        className="bg-slate-950 border border-slate-800/80 rounded-lg p-3 flex items-start justify-between"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-semibold">
+                            {proc.numero_proceso}
+                          </span>
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-200">{proc.nombre}</h4>
+                            {proc.descripcion && (
+                              <p className="text-[11px] text-slate-400 mt-0.5">{proc.descripcion}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Tabla de Proyectos (SQLite Resultados) */}
-              <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-200">
-                      Proyectos en Base de Datos Local
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Tabla: <code className="text-slate-400 font-mono">proyectos</code> en <code className="text-indigo-300 font-mono">database.db</code>
-                    </p>
-                  </div>
-                  <button
-                    onClick={fetchProyectos}
-                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Recargar
-                  </button>
-                </div>
-
-                {loading ? (
-                  <div className="py-16 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                    <span>Consultando GET /api/proyectos a Express...</span>
-                  </div>
-                ) : proyectos.length === 0 ? (
-                  <div className="py-16 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
-                    No hay proyectos en la tabla. Haz clic en "Crear Registro Rápido" para agregar uno.
-                  </div>
+              {/* Flujos de datos */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                  Flujos de Datos ({flujos.length})
+                </h3>
+                {flujos.length === 0 ? (
+                  <p className="text-xs text-slate-500">No hay flujos de datos interconectados.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-slate-400 font-medium">
-                          <th className="py-2.5 px-3">ID</th>
-                          <th className="py-2.5 px-3">Nombre</th>
-                          <th className="py-2.5 px-3">Cliente</th>
-                          <th className="py-2.5 px-3">Fecha de Creación</th>
-                          <th className="py-2.5 px-3 text-right">Acción</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {proyectos.map((p) => (
-                          <tr key={p.id} className="hover:bg-slate-800/40 transition">
-                            <td className="py-2.5 px-3 font-mono text-slate-500">#{p.id}</td>
-                            <td className="py-2.5 px-3 font-medium text-slate-200">{p.nombre}</td>
-                            <td className="py-2.5 px-3 text-slate-400">{p.cliente}</td>
-                            <td className="py-2.5 px-3 text-slate-500 font-mono">{p.fecha_creacion}</td>
-                            <td className="py-2.5 px-3 text-right">
-                              <button
-                                onClick={() => handleDelete(p.id)}
-                                className="text-rose-400 hover:text-rose-300 hover:underline text-xs flex items-center gap-1 ml-auto cursor-pointer"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                Eliminar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="space-y-2 text-xs">
+                    {flujos.map((flujo) => (
+                      <div
+                        key={flujo.id}
+                        className="bg-slate-950 border border-slate-800/80 rounded-lg p-2.5 flex items-center justify-between text-[11px]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-indigo-400 font-mono">
+                            {flujo.proceso_origen_num || 'Origen'} ➔ {flujo.proceso_destino_num || 'Destino'}
+                          </span>
+                          <span className="text-slate-300 font-medium">{flujo.descripcion}</span>
+                        </div>
+                        {flujo.entidad_nombre && (
+                          <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                            Entidad: {flujo.entidad_nombre}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -718,168 +637,261 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Archivos Generados */}
-        {activeTab === 'files' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-            {/* Sub-selector de archivos */}
-            <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-5 h-5 text-indigo-400" />
-                <h2 className="text-base font-semibold text-white">
-                  Código Completo para tu Proyecto Local
-                </h2>
-              </div>
-
-              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+        {/* ======================================================== */}
+        {/* PESTAÑA 5: PUESTOS Y CONEXIONES DCP */}
+        {/* ======================================================== */}
+        {activeTab === 'dcp' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Nuevo Puesto (DCP)
+              </h3>
+              <form onSubmit={handleCrearPuesto} className="space-y-3">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Nombre del Puesto</label>
+                  <input
+                    type="text"
+                    value={nombrePuesto}
+                    onChange={(e) => setNombrePuesto(e.target.value)}
+                    placeholder="Ej. Operador de Bodega"
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Descripción</label>
+                  <textarea
+                    value={descPuesto}
+                    onChange={(e) => setDescPuesto(e.target.value)}
+                    rows={2}
+                    placeholder="Funciones y tareas"
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
                 <button
-                  onClick={() => setSelectedFileKey('server')}
-                  className={`px-3 py-1 text-xs font-mono rounded-md transition ${
-                    selectedFileKey === 'server' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  type="submit"
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white rounded-lg transition cursor-pointer"
                 >
-                  server.js
+                  Guardar Puesto
                 </button>
-                <button
-                  onClick={() => setSelectedFileKey('package')}
-                  className={`px-3 py-1 text-xs font-mono rounded-md transition ${
-                    selectedFileKey === 'package' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  package.json
-                </button>
-                <button
-                  onClick={() => setSelectedFileKey('vite')}
-                  className={`px-3 py-1 text-xs font-mono rounded-md transition ${
-                    selectedFileKey === 'vite' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  vite.config.ts
-                </button>
-                <button
-                  onClick={() => setSelectedFileKey('app')}
-                  className={`px-3 py-1 text-xs font-mono rounded-md transition ${
-                    selectedFileKey === 'app' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  src/App.tsx
-                </button>
-              </div>
+              </form>
             </div>
 
-            {/* Encabezado del archivo seleccionado */}
-            <div className="px-6 py-3 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="font-mono text-xs font-semibold text-indigo-300">
-                  Ubicación: /{filesContent[selectedFileKey].path}
-                </span>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  {filesContent[selectedFileKey].description}
-                </p>
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                  Puestos Registrados ({puestos.length})
+                </h3>
+                {puestos.length === 0 ? (
+                  <p className="text-xs text-slate-500">Sin puestos registrados.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {puestos.map((puesto) => (
+                      <div key={puesto.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Users className="w-3.5 h-3.5 text-indigo-400" />
+                          <h4 className="text-xs font-bold text-white">{puesto.nombre}</h4>
+                        </div>
+                        {puesto.descripcion && (
+                          <p className="text-[11px] text-slate-400">{puesto.descripcion}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
+              {/* Conexiones */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                  Canales de Comunicación entre Puestos ({conexiones.length})
+                </h3>
+                {conexiones.length === 0 ? (
+                  <p className="text-xs text-slate-500">Sin conexiones registradas.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {conexiones.map((c) => (
+                      <div
+                        key={c.id}
+                        className="bg-slate-950 border border-slate-800/80 rounded-lg p-2.5 flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-200">{c.puesto_origen_nombre}</span>
+                          <span className="text-indigo-400">➔</span>
+                          <span className="font-medium text-slate-200">{c.puesto_destino_nombre}</span>
+                        </div>
+                        <span className="text-[11px] text-indigo-300 font-mono bg-indigo-950/60 border border-indigo-800/40 px-2 py-0.5 rounded">
+                          {c.tipo_conexion}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 6: FASES FAST */}
+        {/* ======================================================== */}
+        {activeTab === 'fases' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
+            <h2 className="text-sm font-semibold text-slate-200">
+              Ciclo de Vida de Metodología FAST
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-medium">
+                    <th className="py-2.5 px-3">ID</th>
+                    <th className="py-2.5 px-3">Fase</th>
+                    <th className="py-2.5 px-3">Estado</th>
+                    <th className="py-2.5 px-3">Fecha Inicio</th>
+                    <th className="py-2.5 px-3">Fecha Fin</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {fases.map((fase) => (
+                    <tr key={fase.id} className="hover:bg-slate-800/40 transition">
+                      <td className="py-2.5 px-3 font-mono text-slate-500">#{fase.id}</td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-200">{fase.tipo_fase}</td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            fase.estado === 'Completada'
+                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
+                              : fase.estado === 'En Progreso'
+                              ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {fase.estado}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-slate-400">{fase.fecha_inicio || '—'}</td>
+                      <td className="py-2.5 px-3 font-mono text-slate-400">{fase.fecha_fin || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 7: PROYECTOS */}
+        {/* ======================================================== */}
+        {activeTab === 'proyectos' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Registrar Nuevo Proyecto
+              </h3>
+              <form onSubmit={handleCrearProyecto} className="space-y-3">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Nombre</label>
+                  <input
+                    type="text"
+                    value={nuevoNombreProyecto}
+                    onChange={(e) => setNuevoNombreProyecto(e.target.value)}
+                    placeholder="Ej. Sistema Logístico Integral"
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Cliente</label>
+                  <input
+                    type="text"
+                    value={nuevoClienteProyecto}
+                    onChange={(e) => setNuevoClienteProyecto(e.target.value)}
+                    placeholder="Ej. Acme Global"
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white rounded-lg transition cursor-pointer"
+                >
+                  Guardar Proyecto
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
+              <h3 className="text-sm font-semibold text-slate-200 mb-3">
+                Listado de Proyectos
+              </h3>
+              {proyectos.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => setSelectedProyectoId(p.id)}
+                  className={`p-3 rounded-lg border transition cursor-pointer flex items-center justify-between ${
+                    selectedProyectoId === p.id
+                      ? 'bg-indigo-950/40 border-indigo-500/50 text-indigo-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold text-slate-100 text-xs">{p.nombre}</div>
+                    <div className="text-[11px] text-slate-500">Cliente: {p.cliente} · ID #{p.id}</div>
+                  </div>
+                  {selectedProyectoId === p.id && (
+                    <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-medium">
+                      Activo
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PESTAÑA 8: SQL DDL */}
+        {/* ======================================================== */}
+        {activeTab === 'sql' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-indigo-400" />
+                  Esquema SQLite DDL de la Metodología FAST
+                </h3>
+              </div>
               <button
-                onClick={() => copyCode(filesContent[selectedFileKey].code, selectedFileKey)}
+                onClick={copySQL}
                 className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
               >
-                {copiedKey === selectedFileKey ? (
+                {copiedSQL ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-400">¡Copiado!</span>
+                    <span>¡Copiado!</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Copiar Archivo</span>
+                    <span>Copiar DDL</span>
                   </>
                 )}
               </button>
             </div>
-
-            {/* Visor de código */}
-            <div className="p-6 bg-slate-950 font-mono text-xs text-slate-300 overflow-x-auto max-h-[500px]">
-              <pre>
-                <code>{filesContent[selectedFileKey].code}</code>
-              </pre>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 3: Arquitectura y Explicación del Proxy */}
-        {activeTab === 'architecture' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                <ArrowRightLeft className="w-5 h-5 text-indigo-400" />
-                Cómo Funciona la Arquitectura Local (Express :3000 + Vite :5173)
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Separación limpia de responsabilidades entre el servidor de desarrollo del frontend y el servidor de API.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center gap-2 text-indigo-400 font-semibold">
-                  <Server className="w-4 h-4" />
-                  <span>1. Frontend React (Puerto 5173)</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed">
-                  El cliente ejecuta <code className="text-indigo-300 font-mono">fetch('/api/proyectos')</code> sin especificar el dominio. Como la URL es relativa, el navegador hace la petición a <code className="text-slate-300 font-mono">http://localhost:5173/api/proyectos</code>.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center gap-2 text-amber-400 font-semibold">
-                  <ArrowRightLeft className="w-4 h-4" />
-                  <span>2. Proxy de Vite</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed">
-                  En <code className="text-amber-300 font-mono">vite.config.ts</code>, la regla <code className="text-amber-300 font-mono">proxy: &#123; '/api': 'http://localhost:3000' &#125;</code> intercepta el tráfico y lo redirige en segundo plano al backend sin problemas de CORS en desarrollo.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                  <Database className="w-4 h-4" />
-                  <span>3. Express + SQLite (Puerto 3000)</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed">
-                  Express recibe la petición en <code className="text-emerald-300 font-mono">/api/proyectos</code>, ejecuta sentencias con <code className="text-emerald-300 font-mono">better-sqlite3</code> sobre <code className="text-slate-300 font-mono">database.db</code> y retorna JSON limpio con código 200 o 201.
-                </p>
-              </div>
-            </div>
-
-            {/* Comando para ejecutar ambos */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-              <div className="text-xs font-semibold text-slate-200 mb-2">
-                Comando para iniciar ambos procesos en paralelo:
-              </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 font-mono text-xs text-indigo-300 flex items-center justify-between">
-                <code>npm run dev</code>
-                <span className="text-slate-500 text-[11px] font-sans">
-                  (Ejecuta Express en :3000 y Vite en :5173 mediante concurrently)
-                </span>
-              </div>
+            <div className="p-6 bg-slate-950 font-mono text-xs text-indigo-200 overflow-x-auto max-h-[500px]">
+              <pre>{`-- 8 Tablas Relacionales SQLite
+1. proyectos (id, nombre, cliente, fecha_creacion)
+2. fases (id, proyecto_id, tipo_fase, estado, fecha_inicio, fecha_fin)
+3. entidades (id, proyecto_id, nombre, descripcion)
+4. atributos (id, entidad_id, nombre, tipo_dato, es_clave_primaria)
+5. procesos (id, proyecto_id, nombre, descripcion, numero_proceso)
+6. flujos_datos (id, proceso_origen_id, proceso_destino_id, entidad_id, descripcion)
+7. puestos (id, proyecto_id, nombre, descripcion)
+8. conexiones_puestos (id, puesto_origen_id, puesto_destino_id, tipo_conexion)`}</pre>
             </div>
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-slate-950 py-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span>FAST Web Tool</span>
-            <span aria-hidden="true">·</span>
-            <span>React + Express + better-sqlite3 + Tailwind CSS</span>
-          </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Proxy: <code className="text-slate-300">/api ➔ http://localhost:3000</code></span>
-            <span aria-hidden="true">·</span>
-            <span>Base de datos: <code className="text-slate-300">database.db</code></span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
