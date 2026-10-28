@@ -487,6 +487,7 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
               flujos={flujos}
               puestos={puestos}
               conexiones={conexiones}
+              onPhaseUpdate={loadAllProjectData}
             />
           )}
 

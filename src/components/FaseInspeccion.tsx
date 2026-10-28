@@ -37,11 +37,16 @@ export default function FaseInspeccion({ proyecto, fases, onRefresh }: FaseInspe
 
   const handleUpdateFaseEstado = async (faseId: number, nuevoEstado: string) => {
     try {
-      // Endpoint para actualizar estado si se requiere o simular guardado
-      // En SQLite podemos enviar POST o actualizar
-      onRefresh();
+      const res = await fetch(`/api/fases/${faseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado: nuevoEstado })
+      });
+      if (res.ok) {
+        onRefresh();
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Error al actualizar estado de fase:', err);
     }
   };
 
@@ -124,17 +129,21 @@ export default function FaseInspeccion({ proyecto, fases, onRefresh }: FaseInspe
                     {!fase.tipo_fase.includes('Inspección') && !fase.tipo_fase.includes('Estudio') && !fase.tipo_fase.includes('Definición') && 'Fase complementaria de diseño y construcción.'}
                   </td>
                   <td className="py-3 px-3">
-                    <span
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold ${
+                    <select
+                      value={fase.estado}
+                      onChange={(e) => handleUpdateFaseEstado(fase.id, e.target.value)}
+                      className={`text-[11px] font-semibold px-2 py-1 rounded-lg border focus:outline-none cursor-pointer transition ${
                         fase.estado === 'Completada'
-                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60'
                           : fase.estado === 'En Progreso'
-                          ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700/60'
+                          ? 'bg-amber-950 text-amber-300 border-amber-800/60'
+                          : 'bg-slate-800 text-slate-400 border-slate-700/60'
                       }`}
                     >
-                      {fase.estado}
-                    </span>
+                      <option value="Pendiente">Pendiente</option>
+                      <option value="En Progreso">En Progreso</option>
+                      <option value="Completada">Completada</option>
+                    </select>
                   </td>
                 </tr>
               ))}

@@ -183,6 +183,72 @@ app.post('/api/fases', (req, res) => {
   }
 });
 
+app.put('/api/fases/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado, fecha_inicio, fecha_fin } = req.body;
+    if (!estado) {
+      return res.status(400).json({ error: 'El estado es requerido' });
+    }
+    const stmt = db.prepare(`
+      UPDATE fases 
+      SET estado = ?, 
+          fecha_inicio = COALESCE(?, fecha_inicio, CURRENT_TIMESTAMP),
+          fecha_fin = COALESCE(?, fecha_fin)
+      WHERE id = ?
+    `);
+    stmt.run(estado, fecha_inicio || null, fecha_fin || null, id);
+    const updated = db.prepare('SELECT * FROM fases WHERE id = ?').get(id);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar fase' });
+  }
+});
+
+// Endpoint para avanzar automáticamente la Fase 3: Definición de Necesidades al consultar el diccionario
+app.get('/api/diccionario/:proyecto_id', (req, res) => {
+  try {
+    const { proyecto_id } = req.params;
+    db.prepare(`
+      UPDATE fases 
+      SET estado = 'En Progreso',
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP)
+      WHERE proyecto_id = ? AND tipo_fase = 'Definición de Necesidades'
+    `).run(proyecto_id);
+
+    const fase = db.prepare(`
+      SELECT * FROM fases 
+      WHERE proyecto_id = ? AND tipo_fase = 'Definición de Necesidades'
+    `).get(proyecto_id);
+
+    res.json({ success: true, message: 'Fase Definición de Necesidades en progreso', fase });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar fase de necesidades' });
+  }
+});
+
+// Endpoint para registrar la exportación a PDF y actualizar la fase
+app.post('/api/diccionario/:proyecto_id/exportar-pdf', (req, res) => {
+  try {
+    const { proyecto_id } = req.params;
+    db.prepare(`
+      UPDATE fases 
+      SET estado = 'En Progreso',
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP)
+      WHERE proyecto_id = ? AND tipo_fase = 'Definición de Necesidades'
+    `).run(proyecto_id);
+
+    const fase = db.prepare(`
+      SELECT * FROM fases 
+      WHERE proyecto_id = ? AND tipo_fase = 'Definición de Necesidades'
+    `).get(proyecto_id);
+
+    res.json({ success: true, message: 'Exportación a PDF registrada y fase actualizada', fase });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al registrar exportación de PDF' });
+  }
+});
+
 // --- 3. ENTIDADES Y ATRIBUTOS (Modelo ERD / DER) ---
 app.get('/api/entidades/:proyecto_id', (req, res) => {
   try {
@@ -191,7 +257,7 @@ app.get('/api/entidades/:proyecto_id', (req, res) => {
     
     // Obtener los atributos correspondientes a cada entidad
     const getAtributos = db.prepare('SELECT * FROM atributos WHERE entidad_id = ? ORDER BY id ASC');
-    const entidadesConAtributos = entidades.map((ent: any) => ({
+    const entidadesConAtributos = entidades.map((ent) => ({
       ...ent,
       atributos: getAtributos.all(ent.id)
     }));
@@ -214,6 +280,14 @@ app.post('/api/entidades', (req, res) => {
     // Si se envía atributo PK por defecto id, insertarlo
     const insertPk = db.prepare('INSERT INTO atributos (entidad_id, nombre, tipo_dato, es_clave_primaria) VALUES (?, ?, ?, ?)');
     insertPk.run(info.lastInsertRowid, `id_${nombre.toLowerCase().replace(/\\s+/g, '_')}`, 'INTEGER', 1);
+
+    // Actualizar automáticamente Fase 2: Estudio del Sistema a 'En Progreso'
+    db.prepare(`
+      UPDATE fases 
+      SET estado = 'En Progreso', 
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP) 
+      WHERE proyecto_id = ? AND tipo_fase = 'Estudio del Sistema'
+    `).run(proyecto_id);
 
     const nuevaEntidad = db.prepare('SELECT * FROM entidades WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(nuevaEntidad);
@@ -278,6 +352,15 @@ app.post('/api/procesos', (req, res) => {
     }
     const stmt = db.prepare('INSERT INTO procesos (proyecto_id, nombre, descripcion, numero_proceso) VALUES (?, ?, ?, ?)');
     const info = stmt.run(proyecto_id, nombre.trim(), descripcion ? descripcion.trim() : null, numero_proceso.trim());
+
+    // Actualizar automáticamente Fase 2: Estudio del Sistema a 'En Progreso'
+    db.prepare(`
+      UPDATE fases 
+      SET estado = 'En Progreso', 
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP) 
+      WHERE proyecto_id = ? AND tipo_fase = 'Estudio del Sistema'
+    `).run(proyecto_id);
+
     const nuevo = db.prepare('SELECT * FROM procesos WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(nuevo);
   } catch (error) {
@@ -340,6 +423,15 @@ app.post('/api/puestos', (req, res) => {
     }
     const stmt = db.prepare('INSERT INTO puestos (proyecto_id, nombre, descripcion) VALUES (?, ?, ?)');
     const info = stmt.run(proyecto_id, nombre.trim(), descripcion ? descripcion.trim() : null);
+
+    // Actualizar automáticamente Fase 2: Estudio del Sistema a 'En Progreso'
+    db.prepare(`
+      UPDATE fases 
+      SET estado = 'En Progreso', 
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP) 
+      WHERE proyecto_id = ? AND tipo_fase = 'Estudio del Sistema'
+    `).run(proyecto_id);
+
     const nuevo = db.prepare('SELECT * FROM puestos WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(nuevo);
   } catch (error) {

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { 
@@ -75,6 +75,7 @@ interface DiccionarioDatosProps {
   flujos: FlujoDato[];
   puestos: Puesto[];
   conexiones: ConexionPuesto[];
+  onPhaseUpdate?: () => void;
 }
 
 export default function DiccionarioDatos({
@@ -84,12 +85,23 @@ export default function DiccionarioDatos({
   procesos,
   flujos,
   puestos,
-  conexiones
+  conexiones,
+  onPhaseUpdate
 }: DiccionarioDatosProps) {
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const printableRef = useRef<HTMLDivElement>(null);
+
+  // Al abrir el diccionario, avanzar automáticamente la Fase 3: Definición de Necesidades a 'En Progreso'
+  useEffect(() => {
+    fetch(`/api/diccionario/${proyecto.id}`)
+      .then((res) => res.json())
+      .then(() => {
+        onPhaseUpdate?.();
+      })
+      .catch((err) => console.error('Error al actualizar fase de necesidades:', err));
+  }, [proyecto.id]);
 
   // Generar contenido en Markdown estructurado
   const generateMarkdown = (): string => {
@@ -258,6 +270,11 @@ export default function DiccionarioDatos({
 
       const cleanFileName = `Diccionario_FAST_${proyecto.nombre.toLowerCase().replace(/[^a-z0-9]/g, '_')}.pdf`;
       pdf.save(cleanFileName);
+
+      // Notificar al backend sobre la exportación del PDF para actualizar el ciclo de vida FAST
+      fetch(`/api/diccionario/${proyecto.id}/exportar-pdf`, { method: 'POST' })
+        .then(() => onPhaseUpdate?.())
+        .catch((err) => console.error('Error registrando exportación a PDF:', err));
     } catch (err) {
       console.error('Error al generar PDF del Diccionario FAST:', err);
     } finally {
