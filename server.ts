@@ -427,6 +427,50 @@ app.post('/api/conexiones_puestos', (req, res) => {
   }
 });
 
+app.delete('/api/procesos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM procesos WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Proceso no encontrado' });
+    res.json({ success: true, message: `Proceso #${id} eliminado` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar proceso' });
+  }
+});
+
+app.delete('/api/flujos_datos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM flujos_datos WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Flujo de datos no encontrado' });
+    res.json({ success: true, message: `Flujo #${id} eliminado` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar flujo de datos' });
+  }
+});
+
+app.delete('/api/puestos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM puestos WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Puesto no encontrado' });
+    res.json({ success: true, message: `Puesto #${id} eliminado` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar puesto' });
+  }
+});
+
+app.delete('/api/conexiones_puestos/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM conexiones_puestos WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Conexión no encontrada' });
+    res.json({ success: true, message: `Conexión #${id} eliminada` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar conexión' });
+  }
+});
+
 // Integración Vite en dev o archivos estáticos en prod
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

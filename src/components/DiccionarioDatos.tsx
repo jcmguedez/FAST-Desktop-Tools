@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { 
   FileText, 
   Copy, 
@@ -8,7 +10,9 @@ import {
   Layers, 
   Workflow, 
   Users,
-  CheckCircle2
+  CheckCircle2,
+  FileDown,
+  Loader2
 } from 'lucide-react';
 import { Entidad } from './GestionEntidades';
 
@@ -84,6 +88,8 @@ export default function DiccionarioDatos({
 }: DiccionarioDatosProps) {
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const printableRef = useRef<HTMLDivElement>(null);
 
   // Generar contenido en Markdown estructurado
   const generateMarkdown = (): string => {
@@ -201,6 +207,64 @@ export default function DiccionarioDatos({
     URL.revokeObjectURL(url);
   };
 
+  const handleExportPDF = async () => {
+    try {
+      setIsExportingPdf(true);
+      // Asegurarse de que esté en vista previa para que exista el nodo DOM
+      if (viewMode !== 'preview') {
+        setViewMode('preview');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+
+      const element = printableRef.current;
+      if (!element) {
+        throw new Error('Elemento de impresión no disponible');
+      }
+
+      // Capturar canvas con alta resolución
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#020617' // slate-950
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      // Primera página
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      // Páginas adicionales si el documento es largo
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      const cleanFileName = `Diccionario_FAST_${proyecto.nombre.toLowerCase().replace(/[^a-z0-9]/g, '_')}.pdf`;
+      pdf.save(cleanFileName);
+    } catch (err) {
+      console.error('Error al generar PDF del Diccionario FAST:', err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
       {/* Barra superior de acciones */}
@@ -215,7 +279,7 @@ export default function DiccionarioDatos({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Toggle Vista Previa / Código Markdown */}
           <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
             <button
@@ -255,17 +319,36 @@ export default function DiccionarioDatos({
 
           <button
             onClick={handleDownload}
-            className="px-4 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+            className="px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-400" />
             <span>Descargar .MD</span>
+          </button>
+
+          {/* Botón de Exportación a PDF requerido */}
+          <button
+            onClick={handleExportPDF}
+            disabled={isExportingPdf}
+            className="px-4 py-1.5 text-xs font-medium bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+          >
+            {isExportingPdf ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Generando PDF...</span>
+              </>
+            ) : (
+              <>
+                <FileDown className="w-3.5 h-3.5" />
+                <span className="font-semibold">Exportar PDF</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
       {/* Contenido */}
       {viewMode === 'preview' ? (
-        <div className="p-8 space-y-8 max-w-4xl mx-auto text-slate-200 text-xs">
+        <div ref={printableRef} className="p-8 space-y-8 max-w-4xl mx-auto text-slate-200 text-xs bg-slate-950">
           {/* Encabezado formal */}
           <div className="border-b border-slate-800 pb-6">
             <div className="text-[11px] font-mono text-indigo-400 uppercase tracking-widest mb-1">
