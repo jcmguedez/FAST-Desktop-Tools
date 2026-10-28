@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useProject } from '../context/ProjectContext';
 import FaseInspeccion from './FaseInspeccion';
+import GestionGantt, { TareaGantt } from './GestionGantt';
 import GestionEntidades, { Entidad } from './GestionEntidades';
 import GestionProcesos from './GestionProcesos';
 import GestionPuestos from './GestionPuestos';
@@ -19,6 +20,7 @@ import {
   CheckCircle2, 
   Building2, 
   Calendar,
+  CalendarRange,
   Check,
   Copy,
   FolderGit2
@@ -72,6 +74,7 @@ interface ConexionPuesto {
 
 type WorkspaceTab = 
   | 'fase1-inspeccion'
+  | 'fase1-gantt'
   | 'fase2-erd'
   | 'fase2-dfd'
   | 'fase2-dcp'
@@ -92,6 +95,7 @@ export default function Workspace() {
   const [flujos, setFlujos] = useState<FlujoDato[]>([]);
   const [puestos, setPuestos] = useState<Puesto[]>([]);
   const [conexiones, setConexiones] = useState<ConexionPuesto[]>([]);
+  const [tareasGantt, setTareasGantt] = useState<TareaGantt[]>([]);
 
   const projectId = currentProject?.id;
 
@@ -99,13 +103,14 @@ export default function Workspace() {
     if (!projectId) return;
     try {
       setIsRefreshing(true);
-      const [resFases, resEntidades, resProcesos, resFlujos, resPuestos, resConexiones] = await Promise.all([
+      const [resFases, resEntidades, resProcesos, resFlujos, resPuestos, resConexiones, resGantt] = await Promise.all([
         fetch(`/api/fases/${projectId}`).then((r) => r.json()),
         fetch(`/api/entidades/${projectId}`).then((r) => r.json()),
         fetch(`/api/procesos/${projectId}`).then((r) => r.json()),
         fetch(`/api/flujos_datos/${projectId}`).then((r) => r.json()),
         fetch(`/api/puestos/${projectId}`).then((r) => r.json()),
-        fetch(`/api/conexiones_puestos/${projectId}`).then((r) => r.json())
+        fetch(`/api/conexiones_puestos/${projectId}`).then((r) => r.json()),
+        fetch(`/api/gantt/${projectId}`).then((r) => r.json())
       ]);
 
       setFases(resFases || []);
@@ -114,6 +119,7 @@ export default function Workspace() {
       setFlujos(resFlujos || []);
       setPuestos(resPuestos || []);
       setConexiones(resConexiones || []);
+      setTareasGantt(resGantt || []);
     } catch (err) {
       console.error('Error al sincronizar datos del proyecto en Workspace:', err);
     } finally {
@@ -220,6 +226,16 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
   tipo_conexion TEXT NOT NULL DEFAULT 'Documental',
   FOREIGN KEY (puesto_origen_id) REFERENCES puestos(id) ON DELETE CASCADE,
   FOREIGN KEY (puesto_destino_id) REFERENCES puestos(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tareas_gantt (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre_tarea TEXT NOT NULL,
+  fecha_inicio TEXT NOT NULL,
+  duracion_dias INTEGER NOT NULL,
+  fase_asociada TEXT NOT NULL,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
 );`;
     await navigator.clipboard.writeText(sql);
     setCopiedSQL(true);
@@ -317,6 +333,23 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
                   <span>Resumen del Proyecto</span>
                 </div>
                 <span className="text-[10px] font-mono opacity-70">FAST-1</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('fase1-gantt')}
+                className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition flex items-center justify-between cursor-pointer ${
+                  activeTab === 'fase1-gantt'
+                    ? 'bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/20'
+                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <CalendarRange className="w-4 h-4 shrink-0" />
+                  <span>Cronograma (Gantt)</span>
+                </div>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-950/60 text-slate-300">
+                  {tareasGantt.length}
+                </span>
               </button>
             </div>
 
@@ -450,6 +483,15 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
             />
           )}
 
+          {/* FASE 1: CRONOGRAMA DE GANTT */}
+          {activeTab === 'fase1-gantt' && (
+            <GestionGantt
+              proyecto_id={currentProject.id}
+              proyectoNombre={currentProject.nombre}
+              onDataChange={loadAllProjectData}
+            />
+          )}
+
           {/* FASE 2: GESTIÓN DE ENTIDADES Y ATRIBUTOS (ERD) */}
           {activeTab === 'fase2-erd' && (
             <GestionEntidades
@@ -487,6 +529,7 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
               flujos={flujos}
               puestos={puestos}
               conexiones={conexiones}
+              tareasGantt={tareasGantt}
               onPhaseUpdate={loadAllProjectData}
             />
           )}
@@ -501,6 +544,7 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
               flujos={flujos}
               puestos={puestos}
               conexiones={conexiones}
+              tareasGantt={tareasGantt}
             />
           )}
 

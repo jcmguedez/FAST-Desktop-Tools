@@ -102,12 +102,24 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
   FOREIGN KEY (puesto_destino_id) REFERENCES puestos(id) ON DELETE CASCADE
 );
 
+-- 9. Cronograma de Tareas de Gantt (FAST)
+CREATE TABLE IF NOT EXISTS tareas_gantt (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre_tarea TEXT NOT NULL,
+  fecha_inicio TEXT NOT NULL,
+  duracion_dias INTEGER NOT NULL,
+  fase_asociada TEXT NOT NULL,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
+
 -- Índices de optimización
 CREATE INDEX IF NOT EXISTS idx_fases_proyecto ON fases(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_entidades_proyecto ON entidades(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_atributos_entidad ON atributos(entidad_id);
 CREATE INDEX IF NOT EXISTS idx_procesos_proyecto ON procesos(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_puestos_proyecto ON puestos(proyecto_id);
+CREATE INDEX IF NOT EXISTS idx_gantt_proyecto ON tareas_gantt(proyecto_id);
 `;
 
 db.exec(schemaFAST_SQL);
@@ -156,6 +168,32 @@ if (countProyectos.count === 0) {
 
   const insertCon = db.prepare('INSERT INTO conexiones_puestos (puesto_origen_id, puesto_destino_id, tipo_conexion) VALUES (?, ?, ?)');
   insertCon.run(Number(pst1.lastInsertRowid), Number(pst2.lastInsertRowid), 'Digital / Red POS');
+
+  // Cronograma FAST (Gantt)
+  const insertGantt = db.prepare('INSERT INTO tareas_gantt (proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada) VALUES (?, ?, ?, ?, ?)');
+  insertGantt.run(pid, 'Reunión de Inicio y Definición de Alcance', '2026-10-28', 3, 'Inspección Preliminar');
+  insertGantt.run(pid, 'Estudio de Factibilidad y Plan de Trabajo', '2026-10-31', 4, 'Inspección Preliminar');
+  insertGantt.run(pid, 'Levantamiento de Entidades y Procesos', '2026-11-04', 7, 'Estudio del Sistema');
+  insertGantt.run(pid, 'Modelado DFD y Diagramas de Conexión', '2026-11-11', 5, 'Estudio del Sistema');
+  insertGantt.run(pid, 'Generación de Diccionario y Validación', '2026-11-16', 4, 'Definición de Necesidades');
+}
+
+// Semilla para tareas_gantt si ya existe el proyecto 1 pero no tiene tareas de cronograma
+try {
+  const p1 = db.prepare('SELECT id FROM proyectos ORDER BY id ASC LIMIT 1').get() as { id: number } | undefined;
+  if (p1) {
+    const countG = db.prepare('SELECT COUNT(*) as count FROM tareas_gantt WHERE proyecto_id = ?').get(p1.id) as { count: number };
+    if (countG && countG.count === 0) {
+      const insertGantt = db.prepare('INSERT INTO tareas_gantt (proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada) VALUES (?, ?, ?, ?, ?)');
+      insertGantt.run(p1.id, 'Reunión de Inicio y Definición de Alcance', '2026-10-28', 3, 'Inspección Preliminar');
+      insertGantt.run(p1.id, 'Estudio de Factibilidad y Plan de Trabajo', '2026-10-31', 4, 'Inspección Preliminar');
+      insertGantt.run(p1.id, 'Levantamiento de Entidades y Procesos', '2026-11-04', 7, 'Estudio del Sistema');
+      insertGantt.run(p1.id, 'Modelado DFD y Diagramas de Conexión', '2026-11-11', 5, 'Estudio del Sistema');
+      insertGantt.run(p1.id, 'Generación de Diccionario y Validación', '2026-11-16', 4, 'Definición de Necesidades');
+    }
+  }
+} catch (e) {
+  console.log('Verificación de semillas de cronograma:', e);
 }
 
 // ==========================================
@@ -563,6 +601,72 @@ app.delete('/api/conexiones_puestos/:id', (req, res) => {
     res.json({ success: true, message: `Conexión #${id} eliminada` });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar conexión' });
+  }
+});
+
+// --- CRONOGRAMA DE GANTT (FAST FASE 1 & FASE 2) ---
+app.get('/api/gantt/:proyecto_id', (req, res) => {
+  try {
+    const { proyecto_id } = req.params;
+    const tareas = db.prepare(`
+      SELECT * FROM tareas_gantt 
+      WHERE proyecto_id = ? 
+      ORDER BY fecha_inicio ASC, id ASC
+    `).all(proyecto_id);
+    res.json(tareas);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al consultar cronograma de Gantt' });
+  }
+});
+
+app.post('/api/gantt', (req, res) => {
+  try {
+    const { proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada } = req.body;
+    if (!proyecto_id || !nombre_tarea || !fecha_inicio || !duracion_dias) {
+      return res.status(400).json({ error: 'proyecto_id, nombre_tarea, fecha_inicio y duracion_dias son obligatorios' });
+    }
+
+    const duracion = parseInt(duracion_dias, 10);
+    if (isNaN(duracion) || duracion <= 0) {
+      return res.status(400).json({ error: 'duracion_dias debe ser un número entero mayor a 0' });
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO tareas_gantt (proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada) 
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(
+      proyecto_id,
+      nombre_tarea.trim(),
+      fecha_inicio.trim(),
+      duracion,
+      (fase_asociada || 'Inspección Preliminar').trim()
+    );
+
+    // Actualizar Fase 1 a 'En Progreso' si está en 'Pendiente'
+    db.prepare(`
+      UPDATE fases 
+      SET estado = CASE WHEN estado = 'Pendiente' THEN 'En Progreso' ELSE estado END,
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP)
+      WHERE proyecto_id = ? AND tipo_fase = 'Inspección Preliminar'
+    `).run(proyecto_id);
+
+    const nueva = db.prepare('SELECT * FROM tareas_gantt WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(nueva);
+  } catch (error) {
+    console.error('Error al registrar tarea de Gantt:', error);
+    res.status(500).json({ error: 'Error al registrar tarea en el cronograma' });
+  }
+});
+
+app.delete('/api/gantt/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM tareas_gantt WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Tarea de cronograma no encontrada' });
+    res.json({ success: true, message: `Tarea #${id} eliminada del cronograma` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar tarea del cronograma' });
   }
 });
 

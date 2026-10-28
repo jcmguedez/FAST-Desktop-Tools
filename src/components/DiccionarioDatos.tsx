@@ -12,9 +12,11 @@ import {
   Users,
   CheckCircle2,
   FileDown,
-  Loader2
+  Loader2,
+  CalendarRange
 } from 'lucide-react';
 import { Entidad } from './GestionEntidades';
+import { TareaGantt } from './GestionGantt';
 
 interface Proceso {
   id: number;
@@ -75,6 +77,7 @@ interface DiccionarioDatosProps {
   flujos: FlujoDato[];
   puestos: Puesto[];
   conexiones: ConexionPuesto[];
+  tareasGantt?: TareaGantt[];
   onPhaseUpdate?: () => void;
 }
 
@@ -86,6 +89,7 @@ export default function DiccionarioDatos({
   flujos,
   puestos,
   conexiones,
+  tareasGantt = [],
   onPhaseUpdate
 }: DiccionarioDatosProps) {
   const [copied, setCopied] = useState(false);
@@ -125,11 +129,24 @@ export default function DiccionarioDatos({
       md += `*Sin fases registradas.*\n\n`;
     }
 
-    // 2. Diccionario de Datos (Entidades y Atributos)
-    md += `## 2. Diccionario de Datos (Modelo Entidad-Relación)\n\n`;
+    // 2. Cronograma del Proyecto (Diagrama de Gantt)
+    md += `## 2. Cronograma del Proyecto (Diagrama de Gantt)\n\n`;
+    if (tareasGantt && tareasGantt.length > 0) {
+      md += `| Tarea / Actividad | Fase Metodológica FAST | Fecha Inicio | Duración (Días) |\n`;
+      md += `| :--- | :--- | :--- | :--- |\n`;
+      tareasGantt.forEach((t) => {
+        md += `| **${t.nombre_tarea}** | ${t.fase_asociada} | ${t.fecha_inicio} | ${t.duracion_dias} días |\n`;
+      });
+      md += `\n`;
+    } else {
+      md += `*Sin actividades de cronograma registradas.*\n\n`;
+    }
+
+    // 3. Diccionario de Datos (Entidades y Atributos)
+    md += `## 3. Diccionario de Datos (Modelo Entidad-Relación)\n\n`;
     if (entidades.length > 0) {
       entidades.forEach((ent, index) => {
-        md += `### 2.${index + 1}. Entidad: \`${ent.nombre}\`\n\n`;
+        md += `### 3.${index + 1}. Entidad: \`${ent.nombre}\`\n\n`;
         if (ent.descripcion) {
           md += `> **Descripción:** ${ent.descripcion}\n\n`;
         }
@@ -148,8 +165,8 @@ export default function DiccionarioDatos({
       md += `*Sin entidades registradas.*\n\n`;
     }
 
-    // 3. Catálogo de Procesos (DFD)
-    md += `## 3. Catálogo de Procesos y Flujos de Datos (DFD)\n\n`;
+    // 4. Catálogo de Procesos (DFD)
+    md += `## 4. Catálogo de Procesos y Flujos de Datos (DFD)\n\n`;
     if (procesos.length > 0) {
       md += `| Nº Proceso | Nombre del Proceso | Lógica / Descripción |\n`;
       md += `| :--- | :--- | :--- |\n`;
@@ -160,7 +177,7 @@ export default function DiccionarioDatos({
     }
 
     if (flujos.length > 0) {
-      md += `### 3.1. Flujos de Datos Interconectados\n\n`;
+      md += `### 4.1. Flujos de Datos Interconectados\n\n`;
       md += `| Origen | Destino | Información / Flujo |\n`;
       md += `| :--- | :--- | :--- |\n`;
       flujos.forEach((flujo) => {
@@ -175,10 +192,10 @@ export default function DiccionarioDatos({
       md += `\n`;
     }
 
-    // 4. Diagrama de Conexión de Puestos (DCP)
-    md += `## 4. Estructura de Puestos y Canales de Comunicación (DCP)\n\n`;
+    // 5. Diagrama de Conexión de Puestos (DCP)
+    md += `## 5. Estructura de Puestos y Canales de Comunicación (DCP)\n\n`;
     if (puestos.length > 0) {
-      md += `### 4.1. Puestos de la Organización\n\n`;
+      md += `### 5.1. Puestos de la Organización\n\n`;
       puestos.forEach((p) => {
         md += `- **${p.nombre}:** ${p.descripcion || 'Sin descripción detallada.'}\n`;
       });
@@ -415,11 +432,53 @@ export default function DiccionarioDatos({
             </div>
           </section>
 
-          {/* 2. Diccionario de Datos */}
+          {/* 2. Cronograma del Proyecto (Gantt) */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2">
+              <CalendarRange className="w-4 h-4 text-indigo-400" />
+              2. Cronograma del Proyecto (Planificación Gantt)
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-medium text-[11px]">
+                    <th className="py-2 px-3">Tarea / Actividad</th>
+                    <th className="py-2 px-3">Fase Asociada</th>
+                    <th className="py-2 px-3">Fecha Inicio</th>
+                    <th className="py-2 px-3">Duración</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                  {tareasGantt && tareasGantt.length > 0 ? (
+                    tareasGantt.map((t) => (
+                      <tr key={t.id}>
+                        <td className="py-2 px-3 font-sans font-medium text-slate-200">{t.nombre_tarea}</td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-indigo-950/60 text-indigo-300 border border-indigo-800/40 font-sans">
+                            {t.fase_asociada}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-slate-400">{t.fecha_inicio}</td>
+                        <td className="py-2 px-3 text-slate-300">{t.duracion_dias} {t.duracion_dias === 1 ? 'día' : 'días'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="py-3 px-3 text-slate-500 italic font-sans text-center">
+                        Sin actividades de cronograma registradas en Fase 1.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* 3. Diccionario de Datos */}
           <section className="space-y-4">
             <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2">
               <Database className="w-4 h-4 text-indigo-400" />
-              2. Diccionario de Datos (Modelo ERD / DER)
+              3. Diccionario de Datos (Modelo ERD / DER)
             </h3>
             <div className="space-y-4">
               {entidades.map((ent, idx) => (
@@ -466,11 +525,11 @@ export default function DiccionarioDatos({
             </div>
           </section>
 
-          {/* 3. Procesos DFD */}
+          {/* 4. Procesos DFD */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2">
               <Workflow className="w-4 h-4 text-indigo-400" />
-              3. Catálogo de Procesos (DFD)
+              4. Catálogo de Procesos (DFD)
             </h3>
             <div className="space-y-2">
               {procesos.map((p) => (
@@ -487,11 +546,11 @@ export default function DiccionarioDatos({
             </div>
           </section>
 
-          {/* 4. Puestos y Conexiones */}
+          {/* 5. Puestos y Conexiones */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2">
               <Users className="w-4 h-4 text-indigo-400" />
-              4. Estructura de Puestos y Canales de Enlace (DCP)
+              5. Estructura de Puestos y Canales de Enlace (DCP)
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {puestos.map((p) => (

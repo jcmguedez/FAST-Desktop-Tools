@@ -10,9 +10,11 @@ import {
   RefreshCw, 
   Code2, 
   Eye, 
-  Maximize2 
+  Maximize2,
+  CalendarRange
 } from 'lucide-react';
 import { Entidad } from './GestionEntidades';
+import { TareaGantt } from './GestionGantt';
 
 interface Proceso {
   id: number;
@@ -59,6 +61,7 @@ interface GeneradorDiagramasProps {
   flujos: FlujoDato[];
   puestos: Puesto[];
   conexiones: ConexionPuesto[];
+  tareasGantt?: TareaGantt[];
 }
 
 export default function GeneradorDiagramas({
@@ -68,9 +71,10 @@ export default function GeneradorDiagramas({
   procesos,
   flujos,
   puestos,
-  conexiones
+  conexiones,
+  tareasGantt = []
 }: GeneradorDiagramasProps) {
-  const [diagramType, setDiagramType] = useState<'erd' | 'dfd' | 'dcp'>('erd');
+  const [diagramType, setDiagramType] = useState<'erd' | 'dfd' | 'dcp' | 'gantt'>('erd');
   const [mermaidCode, setMermaidCode] = useState<string>('');
   const [svgContent, setSvgContent] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
@@ -211,6 +215,41 @@ export default function GeneradorDiagramas({
     return code;
   };
 
+  // 4. Generar sintaxis Mermaid para Cronograma (Gantt)
+  const generateGanttCode = (): string => {
+    if (!tareasGantt || tareasGantt.length === 0) {
+      return `gantt\n    title Cronograma del Proyecto FAST - Sin Tareas\n    dateFormat YYYY-MM-DD\n    axisFormat %d/%m\n    section Planificación Inicial\n    Registra tareas en el módulo de Cronograma :des1, 2026-10-28, 5d`;
+    }
+
+    let code = 'gantt\n';
+    const cleanTitle = (proyectoNombre || 'FAST').replace(/[:;#\n]/g, ' ');
+    code += `    title Cronograma Metodológico FAST - ${cleanTitle}\n`;
+    code += '    dateFormat YYYY-MM-DD\n';
+    code += '    axisFormat %d/%m\n';
+
+    // Agrupar tareas por fase_asociada
+    const fasesMap = new Map<string, TareaGantt[]>();
+    tareasGantt.forEach((t) => {
+      const fase = t.fase_asociada || 'Fase General';
+      if (!fasesMap.has(fase)) {
+        fasesMap.set(fase, []);
+      }
+      fasesMap.get(fase)!.push(t);
+    });
+
+    fasesMap.forEach((tasksInFase, faseName) => {
+      const cleanFase = faseName.replace(/[:;#\n]/g, '-');
+      code += `\n    section ${cleanFase}\n`;
+      tasksInFase.forEach((t, idx) => {
+        const cleanName = t.nombre_tarea.replace(/[:;#\n]/g, ' ');
+        const taskId = `t${t.id || idx}`;
+        code += `    ${cleanName} :${taskId}, ${t.fecha_inicio}, ${t.duracion_dias}d\n`;
+      });
+    });
+
+    return code;
+  };
+
   // Actualizar código Mermaid al cambiar de pestaña o de datos
   useEffect(() => {
     let generated = '';
@@ -220,9 +259,11 @@ export default function GeneradorDiagramas({
       generated = generateDFDCode();
     } else if (diagramType === 'dcp') {
       generated = generateDCPCode();
+    } else if (diagramType === 'gantt') {
+      generated = generateGanttCode();
     }
     setMermaidCode(generated);
-  }, [diagramType, entidades, procesos, flujos, puestos, conexiones]);
+  }, [diagramType, entidades, procesos, flujos, puestos, conexiones, tareasGantt, proyectoNombre]);
 
   // Renderizar con Mermaid
   useEffect(() => {
@@ -305,6 +346,15 @@ export default function GeneradorDiagramas({
           >
             <Users className="w-3.5 h-3.5" />
             <span>Conexión de Puestos (DCP)</span>
+          </button>
+          <button
+            onClick={() => setDiagramType('gantt')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
+              diagramType === 'gantt' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CalendarRange className="w-3.5 h-3.5" />
+            <span>Cronograma (Gantt)</span>
           </button>
         </div>
 
@@ -390,6 +440,7 @@ export default function GeneradorDiagramas({
           {diagramType === 'erd' && 'Modelo Entidad-Relación (DER) derivado de tablas "entidades" y "atributos".'}
           {diagramType === 'dfd' && 'Diagrama de Flujo de Datos (DFD) nivel de procesos e intercambios.'}
           {diagramType === 'dcp' && 'Diagrama de Conexión de Puestos (DCP) según metodología FAST.'}
+          {diagramType === 'gantt' && 'Diagrama de Gantt del cronograma del proyecto organizado por fases metodológicas FAST.'}
         </div>
         <div className="text-slate-400 font-mono text-[10px]">
           Renderizado en cliente · Cero dependencias externas

@@ -103,6 +103,17 @@ CREATE TABLE IF NOT EXISTS conexiones_puestos (
   FOREIGN KEY (puesto_destino_id) REFERENCES puestos(id) ON DELETE CASCADE
 );
 
+-- 9. Cronograma de Tareas de Gantt (FAST)
+CREATE TABLE IF NOT EXISTS tareas_gantt (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proyecto_id INTEGER NOT NULL,
+  nombre_tarea TEXT NOT NULL,
+  fecha_inicio TEXT NOT NULL,
+  duracion_dias INTEGER NOT NULL,
+  fase_asociada TEXT NOT NULL,
+  FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
+);
+
 -- Índices de optimización para consultas rápidas
 CREATE INDEX IF NOT EXISTS idx_fases_proyecto ON fases(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_entidades_proyecto ON entidades(proyecto_id);
@@ -111,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_procesos_proyecto ON procesos(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_flujos_origen ON flujos_datos(proceso_origen_id);
 CREATE INDEX IF NOT EXISTS idx_flujos_destino ON flujos_datos(proceso_destino_id);
 CREATE INDEX IF NOT EXISTS idx_puestos_proyecto ON puestos(proyecto_id);
+CREATE INDEX IF NOT EXISTS idx_gantt_proyecto ON tareas_gantt(proyecto_id);
 `;
 
 db.exec(schemaFAST_SQL);
@@ -522,6 +534,71 @@ app.delete('/api/conexiones_puestos/:id', (req, res) => {
     res.json({ success: true, message: `Conexión #${id} eliminada` });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar conexión' });
+  }
+});
+
+// --- CRONOGRAMA DE GANTT (FAST FASE 1 & FASE 2) ---
+app.get('/api/gantt/:proyecto_id', (req, res) => {
+  try {
+    const { proyecto_id } = req.params;
+    const tareas = db.prepare(`
+      SELECT * FROM tareas_gantt 
+      WHERE proyecto_id = ? 
+      ORDER BY fecha_inicio ASC, id ASC
+    `).all(proyecto_id);
+    res.json(tareas);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al consultar cronograma de Gantt' });
+  }
+});
+
+app.post('/api/gantt', (req, res) => {
+  try {
+    const { proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada } = req.body;
+    if (!proyecto_id || !nombre_tarea || !fecha_inicio || !duracion_dias) {
+      return res.status(400).json({ error: 'proyecto_id, nombre_tarea, fecha_inicio y duracion_dias son obligatorios' });
+    }
+
+    const duracion = parseInt(duracion_dias, 10);
+    if (isNaN(duracion) || duracion <= 0) {
+      return res.status(400).json({ error: 'duracion_dias debe ser un número entero mayor a 0' });
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO tareas_gantt (proyecto_id, nombre_tarea, fecha_inicio, duracion_dias, fase_asociada) 
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(
+      proyecto_id,
+      nombre_tarea.trim(),
+      fecha_inicio.trim(),
+      duracion,
+      (fase_asociada || 'Inspección Preliminar').trim()
+    );
+
+    // Actualizar Fase 1 a 'En Progreso' si está en 'Pendiente'
+    db.prepare(`
+      UPDATE fases 
+      SET estado = CASE WHEN estado = 'Pendiente' THEN 'En Progreso' ELSE estado END,
+          fecha_inicio = COALESCE(fecha_inicio, CURRENT_TIMESTAMP)
+      WHERE proyecto_id = ? AND tipo_fase = 'Inspección Preliminar'
+    `).run(proyecto_id);
+
+    const nueva = db.prepare('SELECT * FROM tareas_gantt WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(nueva);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al registrar tarea en el cronograma' });
+  }
+});
+
+app.delete('/api/gantt/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const info = db.prepare('DELETE FROM tareas_gantt WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Tarea de cronograma no encontrada' });
+    res.json({ success: true, message: `Tarea #${id} eliminada del cronograma` });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar tarea del cronograma' });
   }
 });
 
