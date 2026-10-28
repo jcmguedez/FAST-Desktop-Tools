@@ -13,12 +13,15 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 app.use(cors());
 app.use(express.json());
 
-// 1. Conexión a SQLite
-const db = new Database('database.db');
+// 1. Conexión a SQLite con ruta absoluta garantizada
+const DB_PATH = path.resolve(__dirname, 'database.db');
+const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// 2. Esquema SQL completo para la Metodología FAST
+console.log(`📦 Conectado a la base de datos persistente SQLite en: ${DB_PATH}`);
+
+// 2. Esquema SQL para la Metodología FAST (Estrictamente CREATE TABLE IF NOT EXISTS)
 const schemaFAST_SQL = `
 -- 1. Tabla de Proyectos
 CREATE TABLE IF NOT EXISTS proyectos (
@@ -583,5 +586,19 @@ async function startServer() {
     console.log(`🚀 Servidor FAST Express + Vite corriendo en el puerto ${PORT}`);
   });
 }
+
+// Cierre seguro para asegurar que la base de datos SQLite persista sin bloqueos ni pérdidas
+const gracefulShutdown = () => {
+  try {
+    console.log('🔒 Guardando y cerrando conexión SQLite de forma segura...');
+    db.close();
+  } catch (err) {
+    console.error('Error al cerrar base de datos SQLite:', err);
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
 
 startServer();

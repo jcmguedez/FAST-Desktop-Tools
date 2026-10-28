@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -9,10 +14,13 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
-// 2. Conexión a la base de datos local SQLite llamada database.db
-const db = new Database('database.db');
+// 2. Conexión a la base de datos local SQLite con ruta absoluta garantizada
+const DB_PATH = path.resolve(__dirname, 'database.db');
+const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON'); // Asegurar integridad referencial
+
+console.log(`📦 Conectado a la base de datos persistente SQLite en: ${DB_PATH}`);
 
 // 3. Esquema SQL completo para la Metodología FAST
 const schemaFAST_SQL = `
@@ -521,3 +529,17 @@ app.delete('/api/conexiones_puestos/:id', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor Express FAST ejecutándose en http://localhost:${PORT}`);
 });
+
+// Cierre seguro para persistencia SQLite
+const gracefulShutdown = () => {
+  try {
+    console.log('🔒 Guardando y cerrando conexión SQLite de forma segura...');
+    db.close();
+  } catch (err) {
+    console.error('Error al cerrar base de datos SQLite:', err);
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
