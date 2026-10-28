@@ -1,0 +1,6 @@
+{
+  "name": "FAST Desktop Tool - Electron Vite Boilerplate & Simulator",
+  "description": "Boilerplate completo, simulador de IPC y gestor de arquitectura para FAST Desktop Tool con Electron, Vite, React, TypeScript, Tailwind CSS y better-sqlite3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
